@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RTB Test Client</title>
+<style>
+  :root { --border:#e2e2e2; --muted:#6b7280; --accent:#2563eb; --ok:#16a34a; --err:#dc2626; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color:#111; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  select, input, button { font-size: 14px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; }
+  select { width: 100%; margin-bottom: 16px; }
+  .card { border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+  .price-row { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px; }
+  .price { font-size: 32px; font-weight: 700; }
+  .item-name { font-size: 15px; font-weight: 600; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .status-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .status-dot.connected { background: var(--ok); }
+  .status-dot.disconnected { background: var(--err); }
+  form { display:flex; gap:8px; margin-top:14px; }
+  input[name=bidder] { flex: 1; }
+  input[name=amount] { width: 120px; }
+  button { background: var(--accent); color:#fff; border:none; cursor:pointer; font-weight:600; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .msg { margin-top: 10px; font-size: 13px; min-height: 18px; }
+  .msg.ok { color: var(--ok); }
+  .msg.err { color: var(--err); }
+  .feed { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+  .feed-item { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; display:flex; justify-content:space-between; }
+  .feed-item:last-child { border-bottom: none; }
+  .feed-item.live { background: #eff6ff; }
+  .tag { font-size: 10px; text-transform: uppercase; font-weight: 700; padding: 1px 6px; border-radius: 4px; }
+  .tag.live { background: #2563eb; color: #fff; }
+  .tag.you { background: #eee; color: #555; }
+  .empty { color: var(--muted); font-size: 13px; padding: 12px; text-align:center; }
+</style>
+</head>
+<body>
+  <h1>RTB Test Client</h1>
+  <div class="sub"><span id="statusDot" class="status-dot disconnected"></span><span id="statusText">connecting…</span></div>
+
+  <select id="auctionSelect"><option>Loading auctions…</option></select>
+
+  <div class="card">
+    <div class="price-row">
+      <div class="item-name" id="itemName">—</div>
+      <div class="meta" id="endsAt"></div>
+    </div>
+    <div class="price-row">
+      <div class="price" id="currentPrice">—</div>
+      <div class="meta">starting: <span id="startingPrice">—</span></div>
+    </div>
+    <div class="meta">highest bidder: <span id="highestBidder">none yet</span></div>
+
+    <form id="bidForm">
+      <input name="bidder" placeholder="your name" required>
+      <input name="amount" type="number" step="0.01" placeholder="amount" required>
+      <button type="submit">Place Bid</button>
+    </form>
+    <div id="formMsg" class="msg"></div>
+  </div>
+
+  <div class="meta" style="margin-bottom:6px">Live feed — open this page in a second tab to see updates arrive here in real time</div>
+  <div class="feed" id="feed"><div class="empty">No activity yet</div></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let currentAuction = null;
+    let socket;
+    try {
+      socket = io();
+    } catch (e) {
+      console.error('Socket.io init failed:', e);
+      $('statusText').textContent = 'Live updates unavailable (socket failed to init)';
+    }
+
+    // ---------- connection status ----------
+    if (socket) {
+      socket.on('connect', () => {
+        $('statusDot').className = 'status-dot connected';
+        $('statusText').textContent = 'connected';
+        if (currentAuction) socket.emit('auction:join', currentAuction.id);
+      });
+      socket.on('disconnect', () => {
+        $('statusDot').className = 'status-dot disconnected';
+        $('statusText').textContent = 'disconnected — reconnecting…';
+      });
+      socket.on('connect_error', (err) => {
+        $('statusDot').className = 'status-dot disconnected';
+        $('statusText').textContent = 'connection failed: ' + err.message;
+      });
+    }
+
+    // ---------- auction list ----------
+    async function loadAuctionList() {
+      const sel = $('auctionSelect');
+      let auctions;
+      try {
+        const res = await fetch('/api/auctions');
+        if (!res.ok) throw new Error('server returned ' + res.status);
+        auctions = await res.json();
+      } catch (e) {
+        sel.innerHTML = '<option>Cannot reach server — is it running on this port?</option>';
+        console.error('Failed to load auctions:', e);
+        return;
+      }
+      sel.innerHTML = '';
+      if (auctions.length === 0) {
+        sel.innerHTML = '<option>No auctions yet — create one via POST /api/auctions</option>';
+        return;
+      }
+      for (const a of auctions) {
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = `#${a.id} — ${a.item_name} (current: ${a.current_price})`;
+        sel.appendChild(opt);
+      }
+      selectAuction(sel.value);
+    }
+
+    async function selectAuction(id) {
+      if (currentAuction && socket) socket.emit('auction:leave', currentAuction.id);
+      const res = await fetch(`/api/auctions/${id}`);
+      const auction = await res.json();
+      currentAuction = auction;
+      renderAuction(auction);
+      if (socket) socket.emit('auction:join', id);
+      $('feed').innerHTML = '<div class="empty">No activity yet</div>';
+    }
+
+    function renderAuction(a) {
+      $('itemName').textContent = a.item_name;
+      $('currentPrice').textContent = Number(a.current_price).toLocaleString();
+      $('startingPrice').textContent = Number(a.starting_price).toLocaleString();
+      $('highestBidder').textContent = a.highest_bidder || 'none yet';
+      $('endsAt').textContent = 'ends ' + new Date(a.ends_at).toLocaleString();
+    }
+
+    $('auctionSelect').addEventListener('change', (e) => selectAuction(e.target.value));
+
+    // ---------- placing a bid ----------
+    $('bidForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const btn = form.querySelector('button');
+      const bidder = form.bidder.value.trim();
+      const amount = Number(form.amount.value);
+      const msg = $('formMsg');
+
+      btn.disabled = true;
+      msg.textContent = '';
+      msg.className = 'msg';
+
+      try {
+        const res = await fetch(`/api/auctions/${currentAuction.id}/bid`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bidder, amount })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          msg.textContent = data.error;
+          msg.className = 'msg err';
+        } else {
+          msg.textContent = `Bid placed: ${amount} by ${bidder}`;
+          msg.className = 'msg ok';
+          addFeedItem(data, 'you');
+          form.amount.value = '';
+        }
+      } catch (err) {
+        msg.textContent = 'Network error — is the server running?';
+        msg.className = 'msg err';
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // ---------- live updates from other tabs/users ----------
+    if (socket) {
+      socket.on('bid:new', (data) => {
+        if (!currentAuction || data.auctionId !== Number(currentAuction.id)) return;
+        currentAuction.current_price = data.amount;
+        currentAuction.highest_bidder = data.bidder;
+        renderAuction(currentAuction);
+        addFeedItem(data, 'live');
+      });
+    }
+
+    function addFeedItem(data, kind) {
+      const feed = $('feed');
+      if (feed.querySelector('.empty')) feed.innerHTML = '';
+      const row = document.createElement('div');
+      row.className = 'feed-item' + (kind === 'live' ? ' live' : '');
+      const tag = kind === 'live' ? '<span class="tag live">live</span>' : '<span class="tag you">you</span>';
+      row.innerHTML = `<span>${tag} ${data.bidder} bid <b>${data.amount}</b></span><span class="meta">${new Date(data.at).toLocaleTimeString()}</span>`;
+      feed.prepend(row);
+    }
+
+    loadAuctionList();
+  </script>
+</body>
+</html>
