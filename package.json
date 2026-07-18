@@ -9,7 +9,9 @@
     "dev": "node server.js",
     "migrate": "node -e \"import('./db.js').then(m=>m.runMigration())\""
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -17,5 +19,17 @@
     "ioredis": "^5.4.1",
     "pg": "^8.12.0",
     "socket.io": "^4.7.5"
-  }
+  },
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Priyaddharshan-S/bidding-system.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Priyaddharshan-S/bidding-system/issues"
+  },
+  "homepage": "https://github.com/Priyaddharshan-S/bidding-system#readme"
 }
