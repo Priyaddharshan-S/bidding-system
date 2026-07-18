@@ -1,7 +1,14 @@
+import dns from 'node:dns';
 import 'dotenv/config';
 import pg from 'pg';
 import Redis from 'ioredis';
 import fs from 'fs';
+
+// Node 18+ tries IPv6 first by default. Many home/ISP networks (common on
+// Windows) have broken or missing IPv6, which makes DNS lookups fail with
+// ENOTFOUND even though the hostname resolves fine over IPv4. Forcing IPv4
+// first fixes this without touching any Postgres/Redis connection logic.
+dns.setDefaultResultOrder('ipv4first');
 
 // Fail loudly and immediately if the .env file is missing or incomplete —
 // without this, pg/ioredis silently fall back to localhost defaults, which
