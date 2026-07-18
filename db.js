@@ -32,9 +32,14 @@ export const redis = new Redis(process.env.REDIS_URL, {
 export const lbKey = (id) => `auction:${id}:lb`;
 export const priceKey = (id) => `auction:${id}:price`;
 
-export async function runMigration() {
+export async function applySchema() {
   const sql = fs.readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
   await pool.query(sql);
+}
+
+// CLI entry point (npm run migrate) — same logic, but exits the process after.
+export async function runMigration() {
+  await applySchema();
   console.log('Migration applied.');
   process.exit(0);
 }

@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import http from 'http';
 import { Server } from 'socket.io';
-import { pool, redis, lbKey, priceKey } from './db.js';
+import { pool, redis, lbKey, priceKey, applySchema } from './db.js';
 
 const app = express();
 app.use(cors());
@@ -151,4 +151,16 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
+
+// Ensure tables exist before accepting traffic. Safe to run on every boot —
+// CREATE TABLE IF NOT EXISTS is a no-op once the schema is already in place.
+// This is what lets free-tier Render/Railway deploys work without shell access.
+try {
+  await applySchema();
+  console.log('Schema check: OK');
+} catch (err) {
+  console.error('Failed to apply schema on startup:', err.message);
+  process.exit(1);
+}
+
 server.listen(PORT, () => console.log(`RTB platform listening on :${PORT}`));
