@@ -20,6 +20,15 @@ for (const key of ['DATABASE_URL', 'REDIS_URL']) {
   }
 }
 
+// Diagnostic only — prints host:port so we can verify which connection string
+// is actually in effect, without ever logging the password.
+try {
+  const parsed = new URL(process.env.DATABASE_URL);
+  console.log(`DATABASE_URL host: ${parsed.hostname}:${parsed.port || '5432'}`);
+} catch {
+  console.error('DATABASE_URL is not a valid URL — check for stray spaces or line breaks.');
+}
+
 // --- Postgres (Supabase / Neon) ---
 // Both providers require SSL on external connections; rejectUnauthorized:false
 // avoids needing the CA bundle for a free-tier setup.
